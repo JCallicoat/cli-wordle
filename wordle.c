@@ -9,67 +9,8 @@
 #include <time.h>
 #include <unistd.h>
 
-static char **word_list = NULL;
-static int word_list_len = 0;
-
-static char **valid_word_list = NULL;
-static int valid_word_list_len = 0;
-
-// ====================== Word list loading ======================
-static int compare_str(const void *a, const void *b) {
-  return strcmp(*(const char **)a, *(const char **)b);
-}
-
-static bool load_word_list(const char *filename, char ***list, int *len) {
-  FILE *f = fopen(filename, "r");
-  if (!f) {
-    fprintf(stderr, "Error: Could not open %s\n", filename);
-    return false;
-  }
-
-  char *line = NULL;
-  size_t len_line = 0;
-  ssize_t read;
-  int capacity = 1024;
-  *list = malloc(capacity * sizeof(char *));
-  *len = 0;
-
-  while ((read = getline(&line, &len_line, f)) != -1) {
-    // Trim newline and whitespace
-    line[strcspn(line, "\r\n")] = '\0';
-    for (int i = strlen(line) - 1; i >= 0 && isspace(line[i]); i--)
-      line[i] = '\0';
-
-    if (strlen(line) != 5)
-      continue; // Only accept 5-letter words
-
-    if (*len >= capacity) {
-      capacity *= 2;
-      *list = realloc(*list, capacity * sizeof(char *));
-    }
-
-    (*list)[*len] = strdup(line);
-    (*len)++;
-  }
-
-  free(line);
-  fclose(f);
-
-  // Sort the list (so bsearch works even if the file wasn't sorted)
-  qsort(*list, *len, sizeof(char *), compare_str);
-
-  return true;
-}
-
-static void free_word_lists(void) {
-  for (int i = 0; i < word_list_len; i++)
-    free(word_list[i]);
-  free(word_list);
-
-  for (int i = 0; i < valid_word_list_len; i++)
-    free(valid_word_list[i]);
-  free(valid_word_list);
-}
+#include "valid_word_list.h"
+#include "word_list.h"
 
 // ====================== Terminal / Input ======================
 #define ANSI_RESET "\033[0m"
@@ -89,6 +30,7 @@ static void disable_raw_mode(void) {
 static void enable_raw_mode(void) {
   tcgetattr(STDIN_FILENO, &orig_termios);
   atexit(disable_raw_mode);
+
   struct termios raw = orig_termios;
   raw.c_lflag &= ~(ECHO | ICANON);
   raw.c_cc[VMIN] = 1;
@@ -124,7 +66,12 @@ static void erase_screen(void) {
   fflush(stdout);
 }
 
-// ====================== Game Types ======================
+static void reset_attributes(void) {
+  printf(ANSI_RESET);
+  fflush(stdout);
+}
+
+// ====================== Game Types & Logic ======================
 typedef enum {
   LETTER_DEFAULT,
   LETTER_UNUSED,
@@ -148,8 +95,11 @@ typedef struct {
   char last_error[64];
 } GameState;
 
-// ====================== Game Logic ======================
 static int char_to_index(char c) { return tolower(c) - 'a'; }
+
+static int compare_str(const void *a, const void *b) {
+  return strcmp(*(const char **)a, *(const char **)b);
+}
 
 static bool guess_valid(const char *guess) {
   char lower[6];
@@ -159,7 +109,6 @@ static bool guess_valid(const char *guess) {
     lower[i] = tolower((unsigned char)lower[i]);
 
   const char *key = lower;
-
   if (bsearch(&key, word_list, word_list_len, sizeof(char *), compare_str))
     return true;
   if (bsearch(&key, valid_word_list, valid_word_list_len, sizeof(char *),
@@ -167,6 +116,9 @@ static bool guess_valid(const char *guess) {
     return true;
   return false;
 }
+
+// ... (keep check_letter, process_guess, all drawing functions,
+// get_and_process_guess, run_game, new_game exactly the same as before)
 
 static Letter check_letter(GameState *gs, char c, int pos) {
   Letter l = {.chr = c, .state = LETTER_UNUSED};
@@ -218,7 +170,9 @@ static bool process_guess(GameState *gs, const char *guess_upper) {
   return correct_total == 5;
 }
 
-// ====================== Drawing ======================
+// (Keep all the drawing functions: write_colored_letter, draw_keyboard,
+// draw_guesses, etc. — same as last version)
+
 static void write_colored_letter(char c, LetterState state) {
   const char *color = FG_DEFAULT;
   switch (state) {
@@ -311,7 +265,6 @@ static void draw_lost(GameState *gs) {
   write_line_centered(gs, FG_DEFAULT, buf);
 }
 
-// ====================== Game Loop ======================
 static bool get_and_process_guess(GameState *gs) {
   draw_prompt(gs);
   write_centered(gs, FG_DEFAULT, "Enter a guess: ");
@@ -374,6 +327,7 @@ static void new_game(GameState *gs) {
     gs->letters[i].state = LETTER_DEFAULT;
   }
 
+  srand(time(NULL));
   int idx = rand() % word_list_len;
   strncpy(gs->wordle, word_list[idx], 5);
   gs->wordle[5] = '\0';
@@ -391,17 +345,9 @@ static void new_game(GameState *gs) {
 }
 
 int main(void) {
-  if (!load_word_list("word_list.txt", &word_list, &word_list_len) ||
-      !load_word_list("valid_word_list.txt", &valid_word_list,
-                      &valid_word_list_len)) {
-    return 1;
-  }
-  atexit(free_word_lists);
-
   enable_raw_mode();
   atexit(erase_screen);
-
-  srand(time(NULL));
+  atexit(reset_attributes);
 
   bool play_again = true;
   while (play_again) {
