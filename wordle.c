@@ -14,6 +14,7 @@
 #include "word_list.h"
 
 // ====================== Terminal / Input ======================
+
 #define ANSI_RESET "\033[0m"
 #define ANSI_BRIGHT "\033[1m"
 #define FG_DEFAULT "\033[39m"
@@ -21,6 +22,7 @@
 #define FG_RED "\033[31m"
 #define FG_GREEN "\033[32m"
 #define FG_YELLOW "\033[33m"
+#define FG_BLUE "\033[34m"
 
 static struct termios orig_termios;
 
@@ -78,6 +80,7 @@ static void reset_attributes(void) {
 #define MAX_GUESSES 6
 #define ALPHABET 26
 
+// The order here defines priority in process_guess so do not reorder this enum
 typedef enum {
   LETTER_DEFAULT,
   LETTER_UNUSED,
@@ -97,11 +100,14 @@ typedef struct {
   Letter guesses[MAX_GUESSES][WORD_LEN];
   int guess_count;
   char wordle[WORD_LEN + 1];
-  int chr_max_total[ALPHABET];
   char last_error[64];
 } GameState;
 
-static int char_to_index(char c) { return tolower((unsigned char)c) - 'a'; }
+static int char_to_index(char c) {
+  if (!isalpha((unsigned char)c))
+    return -1;
+  return tolower((unsigned char)c) - 'a';
+}
 
 static int compare_str(const void *a, const void *b) {
   return strcmp(*(const char **)a, *(const char **)b);
@@ -129,6 +135,8 @@ static bool process_guess(GameState *gs, const char *guess_upper) {
 
   for (int i = 0; i < WORD_LEN; i++) {
     int idx = char_to_index(gs->wordle[i]);
+    if (idx < 0)
+      continue;
     remaining[idx]++;
   }
 
@@ -148,6 +156,8 @@ static bool process_guess(GameState *gs, const char *guess_upper) {
       continue;
 
     int idx = char_to_index(guess_letters[i].chr);
+    if (idx < 0)
+      continue;
     if (remaining[idx] > 0) {
       guess_letters[i].state = LETTER_POSSIBLE;
       remaining[idx]--;
@@ -156,6 +166,8 @@ static bool process_guess(GameState *gs, const char *guess_upper) {
 
   for (int i = 0; i < WORD_LEN; i++) {
     int idx = char_to_index(guess_letters[i].chr);
+    if (idx < 0)
+      continue;
     if (gs->letters[idx].state != LETTER_CORRECT &&
         guess_letters[i].state > gs->letters[idx].state) {
       gs->letters[idx].state = guess_letters[i].state;
@@ -234,7 +246,7 @@ static void write_line_centered(GameState *gs, const char *color,
 static void draw_prompt(GameState *gs) {
   erase_screen();
   gs->cursor_y = gs->h / 2;
-  write_line_centered(gs, FG_RED ANSI_BRIGHT, "CLI Wordle!");
+  write_line_centered(gs, FG_BLUE ANSI_BRIGHT, "CLI Wordle!");
   write_line_centered(gs, FG_DEFAULT, "");
   draw_keyboard(gs);
   write_line_centered(gs, FG_DEFAULT, "");
@@ -258,7 +270,7 @@ static void draw_won(GameState *gs) {
 
 static void draw_lost(GameState *gs) {
   draw_prompt(gs);
-  write_line_centered(gs, FG_GREEN ANSI_BRIGHT, "Better luck next time, kid!");
+  write_line_centered(gs, FG_RED ANSI_BRIGHT, "Better luck next time, kid!");
   char buf[64];
   snprintf(buf, sizeof(buf), "Word was %s", gs->wordle);
   write_line_centered(gs, FG_DEFAULT, buf);
@@ -343,9 +355,6 @@ static void new_game(GameState *gs) {
   memcpy(gs->wordle, word_list[idx], WORD_LEN + 1);
   for (int i = 0; gs->wordle[i]; i++)
     gs->wordle[i] = toupper((unsigned char)gs->wordle[i]);
-
-  for (int i = 0; i < WORD_LEN; i++)
-    gs->chr_max_total[char_to_index(gs->wordle[i])]++;
 }
 
 static void handle_sigint(int sig) {
