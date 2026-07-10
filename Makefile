@@ -1,5 +1,8 @@
 .PHONY: all clean
 
+CC = gcc
+C_FLAGS = -Wall -Wextra
+
 all: wordle solver
 
 word_list.txt valid_word_list.txt:
@@ -11,11 +14,11 @@ word_list.h valid_word_list.h: word_list.txt valid_word_list.txt
 	python3 generate_headers.py
 
 wordle: wordle.c word_list.h valid_word_list.h
-	gcc -o wordle wordle.c -Wall -Wextra
+	$(CC) -o wordle wordle.c $(C_FLAGS)
 	@echo "Build complete: ./wordle"
 
 solver: solver.c word_list.h valid_word_list.h
-	gcc -o solver solver.c -Wall -Wextra
+	$(CC) -o solver solver.c $(C_FLAGS)
 	@echo "Build complete: ./solver"
 
 clean:
